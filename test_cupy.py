@@ -102,6 +102,7 @@ def train():
     mean_loss_iteration = []
     worst_loss_iteration = []
     best_food_loss_iteration = []
+    best_food_organism_iteration = []
 
     organism = init_organism(n_initial_organisms, size)
     food = np.ones(n_initial_organisms)
@@ -152,6 +153,7 @@ def train():
         mean_loss_iteration.append(cp.asnumpy(organism_loss.mean()))
         worst_loss_iteration.append(cp.asnumpy(organism_loss.max()))
         best_food_loss_iteration.append(cp.asnumpy(organism_loss[np.argsort(food)[-10:]].mean()))
+        best_food_organism_iteration.append(get_organism(organism, np.argmax(food)))
 
         is_living = (food >= 0)
         survivor = get_organism(organism, is_living)
@@ -207,11 +209,19 @@ def train():
 
             plt.savefig('loss.png')
 
-            # with open('save.p','w') as fp:
-            #     pickle.dump({
+        if iteration % 10 == 0:
+            with open('loss_iteration','wb') as fp:
+                pickle.dump({
+                    'best_loss_iteration': best_loss_iteration,
+                    'mean_loss_iteration': mean_loss_iteration,
+                    'worst_loss_iteration': worst_loss_iteration,
+                    'best_food_loss_iteration': best_food_loss_iteration,
+                }, fp)
 
-            #     }, fp)
-
+            with open('organism_iteration','wb') as fp:
+                pickle.dump({
+                    'best_food_organism_iteration': best_food_organism_iteration
+                }, fp)
 
 def main():
     train()
