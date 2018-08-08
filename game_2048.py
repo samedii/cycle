@@ -24,7 +24,7 @@ def add_number(board):
     empty_pos = board == 0
     n_empty = np.sum(empty_pos,axis=(1), keepdims=True)
     pos = np.floor(np.random.random((board.shape[0],1))*n_empty).astype(np.int)
-    
+
     e_sum = np.cumsum(empty_pos, axis=1)-1
     e_sum[~empty_pos] = -1
     mask = (e_sum == pos)
@@ -74,23 +74,18 @@ class Games:
     def __init__(self, n_boards, N=4):
         self.boards = empty_boards(n_boards=n_boards, N=N)
         self.n_boards = n_boards
+        self.old_boards = []
 
     def step(self, actions):
-        previous_boards = self.boards
+        self.old_boards.append(self.boards)
+
         self.boards = move(self.boards, actions)
         self.boards = add_number(self.boards)
         rewards = self.boards.sum(axis=(1,2)) #+ self.boards.max(axis=(1,2))
-        #is_game_over = (self.boards == previous_boards).all(axis=(1, 2))
-        #is_game_over = np.zeros_like(is_game_over, dtype=np.bool)
 
-        def stuck(direction):
-            return (self.boards == move(self.boards, direction*np.ones_like(actions))).all(axis=(1,2))
-
-        is_game_over = reduce(
-            np.logical_and,
-            map(stuck, range(4)),
-            np.ones_like(actions)
-        )
+        is_game_over = np.zeros_like(actions, dtype=np.bool)
+        if len(self.old_boards) >= 5:
+            is_game_over = (self.boards == self.old_boards.pop(0)).all(axis=(1,2))
 
         return self.boards, rewards, is_game_over
 
