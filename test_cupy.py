@@ -70,7 +70,7 @@ def distribute_food(loss, amount):
     sort = np.argsort(organism_loss)
 
     n_organisms = len(sort)
-    ranked_food = 2/n_organisms*np.arange(start=n_organisms, stop=0, step=-1)
+    ranked_food = np.arange(start=n_organisms, stop=0, step=-1)
     ranked_food = ranked_food/ranked_food.sum()*amount
     food = np.zeros_like(ranked_food)
     food[sort] = ranked_food
@@ -78,14 +78,14 @@ def distribute_food(loss, amount):
 
 def train():
 
-    n_iterations = 1000
-    n_moves = 1000
+    n_iterations = 1000000
+    n_moves = 10000
 
     mutation_scale = 0.1
     n_children = 1
-    size = [4**2, 50, 20, 10, 10, 4]
+    size = [16 + 2, 10, 4]
     food_amount = 2000
-    n_initial_organisms = int(food_amount/3)
+    n_initial_organisms = int(food_amount/10)
 
     plt.ion()
     plt.show()
@@ -104,16 +104,27 @@ def train():
         action = np.zeros((n_organisms,))
         for move in range(n_moves):
             board = cp.asarray(board)
+            is_empty = (board == 0).astype(cp.float)
+            vertical = (board[:, :-1] == board[:, 1:])
+            horisontal = (board[:, :, :-1] == board[:, :, 1:])
             board[board == 0] = 1
             board = cp.log2(board)
-            output = apply_organism(get_organism(organism, ~is_game_over), board[~is_game_over].reshape((-1, 16)))
+            data = cp.concatenate((
+                #cp.log2(board).reshape((-1, 16)),
+                is_empty.reshape((-1, 16)),
+                #vertical.reshape((-1, 12)),
+                #horisontal.reshape((-1, 12)),
+                vertical.sum(axis=(1,2)).reshape((-1, 1)),
+                horisontal.sum(axis=(1,2)).reshape((-1, 1))
+            ), axis=1)
+            output = apply_organism(get_organism(organism, ~is_game_over), data[~is_game_over])
             new_action = cp.reshape(output, (-1, 4))
-            #new_action = cp.argmax(new_action, axis=1)
-            new_action = cp.exp(new_action)
-            new_action = new_action/new_action.sum(axis=1, keepdims=True)
-            p = cp.random.rand(new_action.shape[0], 1)
-            c = cp.cumsum(new_action, axis=1)
-            new_action = (p <= c).sum(axis=1)
+            new_action = cp.argmax(new_action, axis=1)
+            # new_action = cp.exp(new_action)
+            # new_action = new_action/new_action.sum(axis=1, keepdims=True)
+            # p = cp.random.rand(new_action.shape[0], 1)
+            # c = cp.cumsum(new_action, axis=1)
+            # new_action = (p <= c).sum(axis=1)
             new_action = cp.asnumpy(new_action)
             action[~is_game_over] = new_action
             board, reward, is_game_over = game.step(action)
@@ -136,24 +147,25 @@ def train():
         survivor = get_organism(organism, is_living)
         food = food[is_living].copy()
 
-        is_new_parent = (food >= 10)
+        is_new_parent = (food >= 1)
         if is_new_parent.sum() >= 1:
             parent = get_organism(survivor, is_new_parent)
             children = mutate(parent, n_children, mutation_scale=mutation_scale)
             organism = concatenate_organism(survivor, children)
             n_new_children = int(is_new_parent.sum()*n_children)
-            food[is_new_parent] -= 5
+            food[is_new_parent] -= 1
             food = np.concatenate((food, np.ones(n_new_children)))
         else:
             organism = survivor
 
-        print('loss: {}, std: {:.2f}, n_organisms: {}, food: {:.2f}, std: {:.2f}, dead: {:.2f}'.format(
+        print('loss: {}, std: {:.2f}, n_organisms: {}, food: {:.2f}, std: {:.2f}, dead: {:.2f}, children: {}'.format(
             organism_loss.min(),
             cp.asnumpy(organism_loss).std(),
             loss.shape[0],
             food.mean(),
             food.std(),
-            (~is_living).sum()/loss.shape[0]
+            (~is_living).sum()/loss.shape[0],
+            is_new_parent.sum()*n_children
         ))
 
         best_organism_index = np.argmin(cp.asnumpy(organism_loss))
