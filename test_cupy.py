@@ -3,9 +3,16 @@ import numpy as np
 import cupy as cp
 #np.asnumpy = lambda self: self
 #cp = np
-import matplotlib.pyplot as plt
-
 import game_2048
+import pickle
+import argparse
+
+parser = argparse.ArgumentParser(description='Cupy evolution')
+parser.add_argument('--no_graphics', default=False, type=bool, nargs='?', const=True, help='no graphics')
+args = parser.parse_args()
+
+if not args.no_graphics:
+    import matplotlib.pyplot as plt
 
 def apply_organism(organism, x):
 
@@ -87,12 +94,14 @@ def train():
     food_amount = 2000
     n_initial_organisms = int(food_amount/10)
 
-    plt.ion()
-    plt.show()
+    if not args.no_graphics:
+        plt.ion()
+        plt.show()
 
     best_loss_iteration = []
     mean_loss_iteration = []
     worst_loss_iteration = []
+    best_food_loss_iteration = []
 
     organism = init_organism(n_initial_organisms, size)
     food = np.ones(n_initial_organisms)
@@ -134,14 +143,15 @@ def train():
 
         loss = -cp.asarray(reward)
         
-        print('iteration: {}'.format(iteration))
         organism_loss = loss
-        best_loss_iteration.append(cp.asnumpy(organism_loss.min()))
-        mean_loss_iteration.append(cp.asnumpy(organism_loss.mean()))
-        worst_loss_iteration.append(cp.asnumpy(organism_loss.max()))
         
         food += distribute_food(loss, amount=food_amount - food.sum())
         food -= 1
+
+        best_loss_iteration.append(cp.asnumpy(organism_loss.min()))
+        mean_loss_iteration.append(cp.asnumpy(organism_loss.mean()))
+        worst_loss_iteration.append(cp.asnumpy(organism_loss.max()))
+        best_food_loss_iteration.append(cp.asnumpy(organism_loss[np.argsort(food)[-10:]].mean()))
 
         is_living = (food >= 0)
         survivor = get_organism(organism, is_living)
@@ -158,7 +168,8 @@ def train():
         else:
             organism = survivor
 
-        print('loss: {}, std: {:.2f}, n_organisms: {}, food: {:.2f}, std: {:.2f}, dead: {:.2f}, children: {}'.format(
+        print('iteration: {}, loss: {}, std: {:.2f}, n_organisms: {}, food: {:.2f}, std: {:.2f}, dead: {:.2f}, children: {}'.format(
+            iteration,
             organism_loss.min(),
             cp.asnumpy(organism_loss).std(),
             loss.shape[0],
@@ -171,27 +182,36 @@ def train():
         best_organism_index = np.argmin(cp.asnumpy(organism_loss))
         print('best final board')
         print(board[best_organism_index])
-        if iteration % 1 == 0:
+
+        if iteration % 1 == 0 and not args.no_graphics:
             best_organism_index = cp.argmin(organism_loss)
 
             plt.clf()
-            # plt.subplot(2, 2, 3)
-            # #plt.yscale('log')
-            # plt.plot(best_board_iteration)
-            # plt.plot(mean__iteration)
-            # plt.plot(worst_loss_iteration)
-
-            plt.subplot(2, 2, 3)
-            #plt.yscale('log')
+            plt.subplot(2, 1, 1)
+            plt.title('Loss (neg. sum of board)')
+            plt.xlabel('Iterations')
+            plt.ylabel('Loss')
             plt.plot(best_loss_iteration)
             plt.plot(mean_loss_iteration)
             plt.plot(worst_loss_iteration)
+            plt.plot(best_food_loss_iteration)
 
-            plt.subplot(2, 2, 4)
+            plt.subplot(2, 1, 2)
+            plt.title('Food')
+            plt.xlabel('Food')
+            plt.ylabel('n_organisms')
             plt.hist(food)
 
             plt.draw()
             plt.pause(0.001)
+
+            plt.savefig('loss.png')
+
+            # with open('save.p','w') as fp:
+            #     pickle.dump({
+
+            #     }, fp)
+
 
 def main():
     train()
