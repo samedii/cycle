@@ -11,14 +11,13 @@ import game_labyrinth
 from tensorboardX import SummaryWriter
 tb = SummaryWriter()
 
-
-# categorical reward
-# increase weight of player
+# Possible things to look at:
 # monte carlo agent
 # random agent
 # monte carlo agent with true world (comparison)
-# make labyrinth (later)
-# different heads for reward, board, and game over
+# make more labyrinths (later)
+# pycolab version of human game
+# rotate input
 
 def gather_random_data():
     n_boards = 100
@@ -72,17 +71,17 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         self.conv1 = nn.Conv2d(4 + 4, 16, 3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(16, 8, 3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 8, 1, stride=1, padding=0)
 
-        self.conv_board = nn.Conv2d(8, 4, 3, stride=1, padding=1)
+        self.conv_board = nn.Conv2d(8, 4, 1, stride=1, padding=0)
 
-        self.conv_reward = nn.Conv2d(8, 8, 3, stride=1, padding=1)
-        self.fc_reward1 = nn.Linear(8*4*4, 16)
+        self.conv_reward = nn.Conv2d(8, 4, 1, stride=1, padding=0)
+        self.fc_reward1 = nn.Linear(4*4*4, 16)
         self.fc_reward2 = nn.Linear(16, 3)
 
-        self.conv_game_over = nn.Conv2d(8, 8, 3, stride=1, padding=1)
-        self.fc_game_over1 = nn.Linear(8*4*4, 16)
-        self.fc_game_over2 = nn.Linear(16, 1)
+        self.conv_game_over = nn.Conv2d(8, 4, 1, stride=1, padding=0)
+        self.fc_game_over1 = nn.Linear(4*4*4, 16)
+        self.fc_game_over2 = nn.Linear(16, 2)
 
 
     def forward(self, board, action):
@@ -99,11 +98,11 @@ class Net(nn.Module):
         next_board = one_hot_board.view(-1, 4, 4, 4) + self.conv_board(x).permute(0, 2, 3, 1)
 
         reward = F.relu(self.conv_game_over(x))
-        reward = F.relu(self.fc_reward1(reward.view(-1, 8*4*4)))
+        reward = F.relu(self.fc_reward1(reward.view(-1, 4*4*4)))
         reward = self.fc_reward2(reward)
 
         is_game_over = F.relu(self.conv_game_over(x))
-        is_game_over = F.relu(self.fc_game_over1(is_game_over.view(-1, 8*4*4)))
+        is_game_over = F.relu(self.fc_game_over1(is_game_over.view(-1, 4*4*4)))
         is_game_over = self.fc_game_over2(is_game_over)
 
         return next_board, reward, is_game_over
@@ -117,7 +116,7 @@ class World():
 
         dist_next_board = torch.distributions.one_hot_categorical.OneHotCategorical(logits=next_board_pred)
         dist_reward = torch.distributions.one_hot_categorical.OneHotCategorical(logits=reward_pred)
-        dist_game_over = torch.distributions.bernoulli.Bernoulli(logits=is_game_over_pred)
+        dist_game_over = torch.distributions.one_hot_categorical.OneHotCategorical(logits=is_game_over_pred)
         
         return dist_next_board, dist_reward, dist_game_over
 
@@ -130,9 +129,12 @@ class World():
         one_hot_reward = torch.eye(3)[reward.view(-1, 1).long() + 1]
         one_hot_reward = one_hot_reward.view(-1, 3).to(action.device)
 
+        one_hot_game_over = torch.eye(2)[is_game_over.view(-1, 1).long()]
+        one_hot_game_over = one_hot_game_over.view(-1, 2).to(action.device)
+
         log_prob_next_board = dist_next_board.log_prob(one_hot_next_board)
         log_prob_reward = dist_reward.log_prob(one_hot_reward)
-        log_prob_game_over = dist_game_over.log_prob(is_game_over)
+        log_prob_game_over = dist_game_over.log_prob(one_hot_game_over)
 
         return log_prob_next_board, log_prob_reward, log_prob_game_over
 
@@ -146,7 +148,7 @@ class World():
         return (
             (torch.arange(4).float().reshape((1,-1)).to(action.device) * dist_next_board.sample()).sum(dim=-1),
             ((torch.arange(3) - 1).float().reshape((1,-1)).to(action.device) * dist_reward.sample()).sum(dim=-1),
-            dist_game_over.sample()
+            (torch.arange(2).float().reshape((1,-1)).to(action.device) * dist_game_over.sample()).sum(dim=-1),
         )
 
 class WorldGame():
@@ -197,7 +199,7 @@ class HumanGame:
             else:
                 raise Exception("not an arrow")
 
-        start_board = self.game.board.copy()
+        start_board = self.game.board
         while(True):
             self.game.board = start_board
             print(self.game.board)
