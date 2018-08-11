@@ -71,45 +71,41 @@ class MemorizedGame:
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(4*4*4 + 4, 512)
-        self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, 256)
-        self.fc4 = nn.Linear(256, 128)
-        self.fc_board1 = nn.Linear(128, 128)
-        self.fc_board2 = nn.Linear(128, 4*4*4)
-        self.fc_reward1 = nn.Linear(128, 16)
-        self.fc_reward2 = nn.Linear(16, 3)
-        self.fc_game_over = nn.Linear(128, 1)
+        self.conv1 = nn.Conv2d(4 + 4, 16, 3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 8, 3, stride=1, padding=1)
 
-    def create_fc():
-        self.fc1 = nn.Linear(4*4*4 + 4, 512)
-        self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, 256)
-        self.fc4 = nn.Linear(256, 128)
-        self.fc_board1 = nn.Linear(128, 128)
-        self.fc_board2 = nn.Linear(128, 4*4*4)
-        self.fc_reward1 = nn.Linear(128, 16)
+        self.conv_board = nn.Conv2d(8, 4, 3, stride=1, padding=1)
+
+        self.conv_reward = nn.Conv2d(8, 8, 3, stride=1, padding=1)
+        self.fc_reward1 = nn.Linear(8*4*4, 16)
         self.fc_reward2 = nn.Linear(16, 3)
-        self.fc_game_over = nn.Linear(128, 1)
+
+        self.conv_game_over = nn.Conv2d(8, 8, 3, stride=1, padding=1)
+        self.fc_game_over1 = nn.Linear(8*4*4, 16)
+        self.fc_game_over2 = nn.Linear(16, 1)
+
 
     def forward(self, board, action):
-        one_hot_board = torch.eye(4)[board.view(-1, 4*4).long()]
-        one_hot_board = one_hot_board.view(-1, 4*4*4).to(action.device)
+        one_hot_board = torch.eye(4)[board.view(-1, 4*4).long()].to(action.device)
+        one_hot_action = torch.eye(4)[action.view(-1, 1).long()].to(action.device)
 
-        one_hot_action = torch.eye(4)[action.view(-1, 1).long()]
-        one_hot_action = one_hot_action.view(-1, 4).to(action.device)
+        x = torch.cat((
+            one_hot_board.view(-1, 4, 4, 4),
+            one_hot_action.view(-1, 1, 1, 4).repeat((1, 4, 4, 1))
+        ), dim=-1)
+        x = F.relu(self.conv1(x.permute(0, 3, 1, 2)))
+        x = F.relu(self.conv2(x))
 
-        x = torch.cat((one_hot_board, one_hot_action), dim=1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        x = F.relu(self.fc4(x))
-        next_board = F.relu(self.fc_board1(x))
-        next_board = self.fc_board2(x)
-        next_board = next_board.view(-1, 4, 4, 4)
-        reward = F.relu(self.fc_reward1(x))
+        next_board = one_hot_board.view(-1, 4, 4, 4) + self.conv_board(x).permute(0, 2, 3, 1)
+
+        reward = F.relu(self.conv_game_over(x))
+        reward = F.relu(self.fc_reward1(reward.view(-1, 8*4*4)))
         reward = self.fc_reward2(reward)
-        is_game_over = self.fc_game_over(x)
+
+        is_game_over = F.relu(self.conv_game_over(x))
+        is_game_over = F.relu(self.fc_game_over1(is_game_over.view(-1, 8*4*4)))
+        is_game_over = self.fc_game_over2(is_game_over)
+
         return next_board, reward, is_game_over
 
 class World():
@@ -201,7 +197,9 @@ class HumanGame:
             else:
                 raise Exception("not an arrow")
 
+        start_board = self.game.board.copy()
         while(True):
+            self.game.board = start_board
             print(self.game.board)
             print("======")
             while(True):
@@ -274,7 +272,7 @@ def main():
                         help='input batch size for training (default: {})'.format(default_batch_size))
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                         help='input batch size for testing (default: 1000)')
-    default_epochs = 100
+    default_epochs = 1000
     parser.add_argument(
         '--epochs',
         type=int, default=default_epochs, metavar='N',
@@ -302,6 +300,9 @@ def main():
 
     dataset = gather_random_data()
 
+    d = dataset[:]
+    print('gathered player positions:')
+    print((d[0] == 1).float().sum(dim=0))
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
     train_loader = torch.utils.data.DataLoader(dataset,
@@ -310,8 +311,8 @@ def main():
     #    batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
     model = Net().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-    #optimizer = optim.Adam(model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
+    #optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
 
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
